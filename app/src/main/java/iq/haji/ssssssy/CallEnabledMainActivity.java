@@ -1,5 +1,4 @@
 package iq.haji.ssssssy;
-
 import android.app.role.RoleManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
