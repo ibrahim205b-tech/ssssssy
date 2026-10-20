@@ -1,4 +1,3 @@
-
 package iq.haji.ssssssy;
 
 import android.app.role.RoleManager;
@@ -28,11 +27,14 @@ public class CallEnabledMainActivity extends MainActivity {
 
     private static final int REQUEST_SCREENING_ROLE = 8091;
 
+    private static final String SETUP_PREFS = "ssssssy_call_setup";
+    private static final String KEY_FIRST_ROLE_PROMPT_DONE =
+            "first_role_prompt_done";
+
     private final Handler handler =
             new Handler(Looper.getMainLooper());
 
     private EditText customerPhone;
-    private Button activationButton;
 
     private boolean receiverRegistered = false;
     private boolean controlsAdded = false;
@@ -73,6 +75,72 @@ public class CallEnabledMainActivity extends MainActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // طلب صلاحية استقبال رقم المتصل عند أول تشغيل فقط.
+        handler.postDelayed(
+                this::requestScreeningRoleOnFirstLaunch,
+                1000
+        );
+    }
+
+    private void requestScreeningRoleOnFirstLaunch() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return;
+        }
+
+        SharedPreferences setupPreferences = getSharedPreferences(
+                SETUP_PREFS,
+                Context.MODE_PRIVATE
+        );
+
+        if (setupPreferences.getBoolean(
+                KEY_FIRST_ROLE_PROMPT_DONE,
+                false
+        )) {
+            return;
+        }
+
+        RoleManager roleManager = (RoleManager)
+                getSystemService(Context.ROLE_SERVICE);
+
+        if (roleManager == null) {
+            setupPreferences.edit()
+                    .putBoolean(KEY_FIRST_ROLE_PROMPT_DONE, true)
+                    .apply();
+            return;
+        }
+
+        if (roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
+            setupPreferences.edit()
+                    .putBoolean(KEY_FIRST_ROLE_PROMPT_DONE, true)
+                    .apply();
+            return;
+        }
+
+        if (!roleManager.isRoleAvailable(
+                RoleManager.ROLE_CALL_SCREENING
+        )) {
+            setupPreferences.edit()
+                    .putBoolean(KEY_FIRST_ROLE_PROMPT_DONE, true)
+                    .apply();
+            return;
+        }
+
+        // نسجل ظهور الطلب حتى لا يتكرر عند تشغيل التطبيق لاحقاً.
+        setupPreferences.edit()
+                .putBoolean(KEY_FIRST_ROLE_PROMPT_DONE, true)
+                .apply();
+
+        try {
+            startActivityForResult(
+                    roleManager.createRequestRoleIntent(
+                            RoleManager.ROLE_CALL_SCREENING
+                    ),
+                    REQUEST_SCREENING_ROLE
+            );
+        } catch (Exception ignored) {
+            // لا نوقف الكاشير إذا تعذر عرض نافذة الصلاحية.
+        }
     }
 
     @Override
@@ -111,7 +179,6 @@ public class CallEnabledMainActivity extends MainActivity {
         }
 
         syncStoredNumber();
-        updateActivationButton();
 
         handler.removeCallbacks(refreshPendingNumber);
         handler.post(refreshPendingNumber);
@@ -248,8 +315,6 @@ public class CallEnabledMainActivity extends MainActivity {
                     int before,
                     int count
             ) {
-                // عند إكمال الطلب ومسح الحقل أو مسحه يدوياً،
-                // لا نعيد تعبئة الرقم القديم مرة أخرى.
                 if (!updatingIncomingNumber &&
                         s != null &&
                         s.length() == 0 &&
@@ -289,7 +354,6 @@ public class CallEnabledMainActivity extends MainActivity {
 
         LinearLayout parent = (LinearLayout) viewParent;
 
-        // منع تكرار الأزرار عند العودة إلى التطبيق.
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
 
@@ -304,15 +368,6 @@ public class CallEnabledMainActivity extends MainActivity {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(android.view.Gravity.CENTER_VERTICAL);
 
-        activationButton = createActionButton(
-                "تفعيل الاتصال",
-                Color.rgb(232, 93, 4)
-        );
-
-        activationButton.setOnClickListener(
-                v -> requestScreeningRole()
-        );
-
         Button transferButton = createActionButton(
                 "ترحيل الرقم",
                 Color.rgb(214, 40, 40)
@@ -322,25 +377,12 @@ public class CallEnabledMainActivity extends MainActivity {
 
         LinearLayout.LayoutParams buttonParams =
                 new LinearLayout.LayoutParams(
-                        0,
-                        dp(36),
-                        1
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        dp(36)
                 );
 
         buttonParams.setMargins(dp(2), 0, dp(2), 0);
-
-        row.addView(activationButton, buttonParams);
-
-        LinearLayout.LayoutParams transferParams =
-                new LinearLayout.LayoutParams(
-                        0,
-                        dp(36),
-                        1
-                );
-
-        transferParams.setMargins(dp(2), 0, dp(2), 0);
-
-        row.addView(transferButton, transferParams);
+        row.addView(transferButton, buttonParams);
 
         int phoneIndex = parent.indexOfChild(customerPhone);
 
@@ -352,178 +394,4 @@ public class CallEnabledMainActivity extends MainActivity {
 
         rowParams.setMargins(0, 0, 0, dp(4));
 
-        parent.addView(row, phoneIndex + 1, rowParams);
-
-        controlsAdded = true;
-    }
-
-    private Button createActionButton(
-            String title,
-            int backgroundColor
-    ) {
-        Button button = new Button(this);
-
-        button.setText(title);
-        button.setTextSize(11);
-        button.setAllCaps(false);
-        button.setTextColor(Color.WHITE);
-        button.setMinHeight(0);
-        button.setMinimumHeight(0);
-        button.setPadding(dp(4), 0, dp(4), 0);
-
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(backgroundColor);
-        background.setCornerRadius(dp(8));
-
-        button.setBackground(background);
-
-        return button;
-    }
-
-    private void transferNumber() {
-        if (customerPhone == null) {
-            findCustomerPhoneField();
-        }
-
-        updatingIncomingNumber = true;
-
-        if (customerPhone != null) {
-            customerPhone.setText("");
-        }
-
-        updatingIncomingNumber = false;
-
-        callPreferences().edit()
-                .remove(CallerScreeningService.KEY_PENDING_NUMBER)
-                .remove(CallerScreeningService.KEY_INCOMING_TIME)
-                .apply();
-
-        lastSeenStoredNumber = "";
-
-        Toast.makeText(
-                this,
-                "تم ترحيل الرقم دون إنشاء طلب",
-                Toast.LENGTH_SHORT
-        ).show();
-    }
-
-    private void requestScreeningRole() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            Toast.makeText(
-                    this,
-                    "يتطلب استقبال المكالمات أندرويد 10 أو أحدث",
-                    Toast.LENGTH_LONG
-            ).show();
-            return;
-        }
-
-        RoleManager roleManager = (RoleManager)
-                getSystemService(Context.ROLE_SERVICE);
-
-        if (roleManager == null ||
-                !roleManager.isRoleAvailable(
-                        RoleManager.ROLE_CALL_SCREENING
-                )) {
-            Toast.makeText(
-                    this,
-                    "خدمة فحص المكالمات غير متاحة على هذا الجهاز",
-                    Toast.LENGTH_LONG
-            ).show();
-            return;
-        }
-
-        if (roleManager.isRoleHeld(
-                RoleManager.ROLE_CALL_SCREENING
-        )) {
-            updateActivationButton();
-
-            Toast.makeText(
-                    this,
-                    "استقبال رقم المتصل مفعّل",
-                    Toast.LENGTH_SHORT
-            ).show();
-
-            return;
-        }
-
-        startActivityForResult(
-                roleManager.createRequestRoleIntent(
-                        RoleManager.ROLE_CALL_SCREENING
-                ),
-                REQUEST_SCREENING_ROLE
-        );
-    }
-
-    private void updateActivationButton() {
-        if (activationButton == null) {
-            return;
-        }
-
-        boolean enabled = false;
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            RoleManager roleManager = (RoleManager)
-                    getSystemService(Context.ROLE_SERVICE);
-
-            enabled = roleManager != null &&
-                    roleManager.isRoleHeld(
-                            RoleManager.ROLE_CALL_SCREENING
-                    );
-        }
-
-        activationButton.setText(
-                enabled
-                        ? "الاتصال مفعّل"
-                        : "تفعيل الاتصال"
-        );
-    }
-
-    private void applyCompactLayout(View view) {
-        if (view instanceof Button) {
-            Button button = (Button) view;
-
-            button.setTextSize(
-                    Math.min(button.getTextSize() /
-                            getResources().getDisplayMetrics().scaledDensity,
-                            13)
-            );
-
-            button.setPadding(dp(4), dp(2), dp(4), dp(2));
-
-            ViewGroup.LayoutParams params = button.getLayoutParams();
-
-            if (params != null &&
-                    params.height > dp(38) &&
-                    params.height <= dp(48)) {
-                params.height = dp(36);
-                button.setLayoutParams(params);
-            }
-        } else if (view instanceof TextView &&
-                !(view instanceof EditText)) {
-
-            TextView textView = (TextView) view;
-
-            float size = textView.getTextSize() /
-                    getResources().getDisplayMetrics().scaledDensity;
-
-            if (size > 20) {
-                textView.setTextSize(20);
-            }
-        }
-
-        if (view instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) view;
-
-            for (int i = 0; i < group.getChildCount(); i++) {
-                applyCompactLayout(group.getChildAt(i));
-            }
-        }
-    }
-
-    private int dp(int value) {
-        return (int) (
-                value * getResources().getDisplayMetrics().density
-                        + 0.5f
-        );
-    }
-}
+        parent.addView(row, phoneIndex + 
