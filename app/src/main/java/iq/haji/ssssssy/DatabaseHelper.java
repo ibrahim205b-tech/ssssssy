@@ -1,3 +1,4 @@
+
 package iq.haji.ssssssy;
 
 import android.content.ContentValues;
@@ -13,7 +14,7 @@ import java.util.Locale;
 public class DatabaseHelper extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "haji_cashier.db";
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 3;
 
     public DatabaseHelper(Context context) {
         super(context, DB_NAME, null, DB_VERSION);
@@ -23,6 +24,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
     public void onCreate(SQLiteDatabase db) {
         createOrdersTable(db);
         createMenuTables(db);
+        createLogsTable(db);
         seedDefaultMenu(db);
     }
 
@@ -33,7 +35,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             "order_number INTEGER NOT NULL," +
             "items TEXT NOT NULL," +
             "total INTEGER NOT NULL," +
-            "created_at TEXT NOT NULL)"
+            "created_at TEXT NOT NULL," +
+            "customer_phone TEXT NOT NULL DEFAULT ''," +
+            "status TEXT NOT NULL DEFAULT 'مكتمل'," +
+            "cancel_reason TEXT NOT NULL DEFAULT '')"
         );
     }
 
@@ -56,6 +61,92 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         );
     }
 
+    private void createLogsTable(SQLiteDatabase db) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS operation_logs (" +
+            "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+            "action TEXT NOT NULL," +
+            "details TEXT NOT NULL DEFAULT ''," +
+            "created_at TEXT NOT NULL)"
+        );
+    }
+
+    private void ensureColumn(
+        SQLiteDatabase db, String table, String column, String definition
+    ) {
+        Cursor cursor = db.rawQuery("PRAGMA table_info(" + table + ")", null);
+        boolean found = false;
+
+        try {
+            int nameIndex = cursor.getColumnIndex("name");
+            while (cursor.moveToNext()) {
+                if (column.equalsIgnoreCase(cursor.getString(nameIndex))) {
+                    found = true;
+                    break;
+                }
+            }
+        } finally {
+            cursor.close();
+        }
+
+        if (!found) {
+            db.execSQL(
+                "ALTER TABLE " + table + " ADD COLUMN " +
+                column + " " + definition
+            );
+        }
+    }
+
+    @Override
+    public void onUpgrade(
+        SQLiteDatabase db, int oldVersion, int newVersion
+    ) {
+        db.beginTransaction();
+
+        try {
+            createOrdersTable(db);
+            createMenuTables(db);
+            createLogsTable(db);
+
+            ensureColumn(
+                db, "orders", "customer_phone",
+                "TEXT NOT NULL DEFAULT ''"
+            );
+            ensureColumn(
+                db, "orders", "status",
+                "TEXT NOT NULL DEFAULT 'مكتمل'"
+            );
+            ensureColumn(
+                db, "orders", "cancel_reason",
+                "TEXT NOT NULL DEFAULT ''"
+            );
+
+            seedDefaultMenu(db);
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    private String now() {
+        return new SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss", Locale.getDefault()
+        ).format(new Date());
+    }
+
+    private void log(SQLiteDatabase db, String action, String details) {
+        ContentValues values = new ContentValues();
+        values.put("action", action);
+        values.put("details", details == null ? "" : details);
+        values.put("created_at", now());
+        db.insert("operation_logs", null, values);
+    }
+
+    public void logOperation(String action, String details) {
+        SQLiteDatabase db = getWritableDatabase();
+        log(db, action, details);
+    }
+
     private void seedDefaultMenu(SQLiteDatabase db) {
         insertCategory(db, "العروضات", 0);
         insertCategory(db, "البيتزا", 1);
@@ -74,10 +165,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         insertDishIfMissing(db, "بيبسي", 1000, drinks);
     }
 
-    private void insertCategory(SQLiteDatabase db, String name, int position) {
+    private void insertCategory(
+        SQLiteDatabase db, String name, int position
+    ) {
         ContentValues values = new ContentValues();
         values.put("name", name);
         values.put("position", position);
+
         db.insertWithOnConflict(
             "categories", null, values, SQLiteDatabase.CONFLICT_IGNORE
         );
@@ -90,10 +184,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         );
 
         long id = -1;
-        if (cursor.moveToFirst()) {
-            id = cursor.getLong(0);
+        try {
+            if (cursor.moveToFirst()) id = cursor.getLong(0);
+        } finally {
+            cursor.close();
         }
-        cursor.close();
         return id;
     }
 
@@ -107,8 +202,12 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             new String[]{name, String.valueOf(categoryId)}
         );
 
-        boolean exists = cursor.moveToFirst();
-        cursor.close();
+        boolean exists;
+        try {
+            exists = cursor.moveToFirst();
+        } finally {
+            cursor.close();
+        }
 
         if (!exists) {
             ContentValues values = new ContentValues();
@@ -119,20 +218,10 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
-    @Override
-    public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        if (oldVersion < 2) {
-            createOrdersTable(db);
-            createMenuTables(db);
-            seedDefaultMenu(db);
-        }
-    }
-
     public Cursor getCategories() {
         return getReadableDatabase().rawQuery(
             "SELECT id, name, position FROM categories " +
-            "ORDER BY position ASC, id ASC",
-            null
+            "ORDER BY position ASC, id ASC", null
         );
     }
 
@@ -156,24 +245,29 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         );
 
         int position = 0;
-        if (cursor.moveToFirst()) {
-            position = cursor.getInt(0);
+        try {
+            if (cursor.moveToFirst()) position = cursor.getInt(0);
+        } finally {
+            cursor.close();
         }
-        cursor.close();
 
         ContentValues values = new ContentValues();
         values.put("name", cleanName);
         values.put("position", position);
 
-        return db.insertWithOnConflict(
+        long result = db.insertWithOnConflict(
             "categories", null, values, SQLiteDatabase.CONFLICT_IGNORE
         );
+
+        if (result != -1) log(db, "إضافة قسم", cleanName);
+        return result;
     }
 
     public long addDish(String name, int price, long categoryId) {
         String cleanName = name == null ? "" : name.trim();
 
-        if (cleanName.isEmpty() || price < 0 || !categoryExists(categoryId)) {
+        if (cleanName.isEmpty() || price < 0 ||
+            !categoryExists(categoryId)) {
             return -1;
         }
 
@@ -182,7 +276,13 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         values.put("price", price);
         values.put("category_id", categoryId);
 
-        return getWritableDatabase().insert("dishes", null, values);
+        SQLiteDatabase db = getWritableDatabase();
+        long result = db.insert("dishes", null, values);
+
+        if (result != -1) {
+            log(db, "إضافة طبق", cleanName + " بسعر " + price);
+        }
+        return result;
     }
 
     public int updateDish(long id, String name, int price) {
@@ -193,16 +293,38 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         values.put("name", cleanName);
         values.put("price", price);
 
-        return getWritableDatabase().update(
+        SQLiteDatabase db = getWritableDatabase();
+        int result = db.update(
             "dishes", values, "id = ?",
             new String[]{String.valueOf(id)}
         );
+
+        if (result > 0) {
+            log(db, "تعديل طبق", cleanName + " بسعر " + price);
+        }
+        return result;
     }
 
     public int deleteDish(long id) {
-        return getWritableDatabase().delete(
+        SQLiteDatabase db = getWritableDatabase();
+        Cursor cursor = db.rawQuery(
+            "SELECT name FROM dishes WHERE id = ?",
+            new String[]{String.valueOf(id)}
+        );
+
+        String name = "";
+        try {
+            if (cursor.moveToFirst()) name = cursor.getString(0);
+        } finally {
+            cursor.close();
+        }
+
+        int result = db.delete(
             "dishes", "id = ?", new String[]{String.valueOf(id)}
         );
+
+        if (result > 0) log(db, "حذف طبق من المنيو", name);
+        return result;
     }
 
     public int deleteCategory(long id) {
@@ -212,6 +334,18 @@ public class DatabaseHelper extends SQLiteOpenHelper {
         db.beginTransaction();
 
         try {
+            Cursor cursor = db.rawQuery(
+                "SELECT name FROM categories WHERE id = ?",
+                new String[]{String.valueOf(id)}
+            );
+
+            String name = "";
+            try {
+                if (cursor.moveToFirst()) name = cursor.getString(0);
+            } finally {
+                cursor.close();
+            }
+
             db.delete(
                 "dishes", "category_id = ?",
                 new String[]{String.valueOf(id)}
@@ -222,6 +356,7 @@ public class DatabaseHelper extends SQLiteOpenHelper {
                 new String[]{String.valueOf(id)}
             );
 
+            if (result > 0) log(db, "حذف قسم", name);
             db.setTransactionSuccessful();
             return result;
         } finally {
@@ -235,9 +370,11 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             new String[]{String.valueOf(id)}
         );
 
-        boolean exists = cursor.moveToFirst();
-        cursor.close();
-        return exists;
+        try {
+            return cursor.moveToFirst();
+        } finally {
+            cursor.close();
+        }
     }
 
     private boolean isOffersCategory(long id) {
@@ -246,51 +383,157 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             new String[]{String.valueOf(id)}
         );
 
-        boolean protectedCategory = false;
-        if (cursor.moveToFirst()) {
-            protectedCategory = "العروضات".equals(cursor.getString(0));
+        try {
+            return cursor.moveToFirst() &&
+                "العروضات".equals(cursor.getString(0));
+        } finally {
+            cursor.close();
         }
-        cursor.close();
-        return protectedCategory;
     }
 
     public long saveOrder(String items, int total) {
+        return saveOrder(items, total, "");
+    }
+
+    public long saveOrder(
+        String items, int total, String customerPhone
+    ) {
         if (items == null || items.trim().isEmpty() || total < 0) {
             return -1;
         }
 
         SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
 
-        int nextNumber = 1;
-        Cursor cursor = db.rawQuery(
-            "SELECT COALESCE(MAX(order_number), 0) + 1 FROM orders",
-            null
-        );
+        try {
+            Cursor cursor = db.rawQuery(
+                "SELECT COALESCE(MAX(order_number), 0) + 1 FROM orders",
+                null
+            );
 
-        if (cursor.moveToFirst()) {
-            nextNumber = cursor.getInt(0);
+            int nextNumber = 1;
+            try {
+                if (cursor.moveToFirst()) nextNumber = cursor.getInt(0);
+            } finally {
+                cursor.close();
+            }
+
+            ContentValues values = new ContentValues();
+            values.put("order_number", nextNumber);
+            values.put("items", items);
+            values.put("total", total);
+            values.put("created_at", now());
+            values.put(
+                "customer_phone",
+                customerPhone == null ? "" : customerPhone.trim()
+            );
+            values.put("status", "مكتمل");
+            values.put("cancel_reason", "");
+
+            long id = db.insert("orders", null, values);
+
+            if (id != -1) {
+                log(
+                    db, "حفظ طلب",
+                    "رقم الطلب " + nextNumber + " والإجمالي " + total
+                );
+                db.setTransactionSuccessful();
+            }
+
+            return id;
+        } finally {
+            db.endTransaction();
         }
-        cursor.close();
+    }
 
-        String date = new SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss", Locale.getDefault()
-        ).format(new Date());
+    public int cancelOrder(long orderId, String reason) {
+        String cleanReason = reason == null ? "" : reason.trim();
+        if (cleanReason.isEmpty()) return 0;
 
-        ContentValues values = new ContentValues();
-        values.put("order_number", nextNumber);
-        values.put("items", items);
-        values.put("total", total);
-        values.put("created_at", date);
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
 
-        return db.insert("orders", null, values);
+        try {
+            ContentValues values = new ContentValues();
+            values.put("status", "ملغي");
+            values.put("cancel_reason", cleanReason);
+
+            int result = db.update(
+                "orders", values,
+                "id = ? AND status != 'ملغي'",
+                new String[]{String.valueOf(orderId)}
+            );
+
+            if (result > 0) {
+                log(
+                    db, "إلغاء طلب",
+                    "معرّف الطلب " + orderId + " والسبب: " + cleanReason
+                );
+            }
+
+            db.setTransactionSuccessful();
+            return result;
+        } finally {
+            db.endTransaction();
+        }
     }
 
     public Cursor getRecentOrders() {
         return getReadableDatabase().rawQuery(
             "SELECT id, order_number, items, total, created_at " +
-            "FROM orders ORDER BY id DESC LIMIT 30",
-            null
+            "FROM orders ORDER BY id DESC LIMIT 30", null
         );
+    }
+
+    public Cursor getRecentOrdersDetailed() {
+        return getReadableDatabase().rawQuery(
+            "SELECT id, order_number, items, total, created_at, " +
+            "customer_phone, status, cancel_reason " +
+            "FROM orders ORDER BY id DESC LIMIT 100", null
+        );
+    }
+
+    public Cursor getTodayOrders() {
+        return getReadableDatabase().rawQuery(
+            "SELECT id, order_number, items, total, created_at, " +
+            "customer_phone, status, cancel_reason FROM orders " +
+            "WHERE substr(created_at, 1, 10) = ? ORDER BY id DESC",
+            new String[]{new SimpleDateFormat(
+                "yyyy-MM-dd", Locale.getDefault()
+            ).format(new Date())}
+        );
+    }
+
+    public int getTodaySales() {
+        Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT COALESCE(SUM(total), 0) FROM orders " +
+            "WHERE substr(created_at, 1, 10) = ? AND status != 'ملغي'",
+            new String[]{new SimpleDateFormat(
+                "yyyy-MM-dd", Locale.getDefault()
+            ).format(new Date())}
+        );
+
+        try {
+            return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+        } finally {
+            cursor.close();
+        }
+    }
+
+    public int getTodayOrdersCount() {
+        Cursor cursor = getReadableDatabase().rawQuery(
+            "SELECT COUNT(*) FROM orders " +
+            "WHERE substr(created_at, 1, 10) = ?",
+            new String[]{new SimpleDateFormat(
+                "yyyy-MM-dd", Locale.getDefault()
+            ).format(new Date())}
+        );
+
+        try {
+            return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+        } finally {
+            cursor.close();
+        }
     }
 
     public int getOrdersCount() {
@@ -298,11 +541,37 @@ public class DatabaseHelper extends SQLiteOpenHelper {
             "SELECT COUNT(*) FROM orders", null
         );
 
-        int count = 0;
-        if (cursor.moveToFirst()) {
-            count = cursor.getInt(0);
+        try {
+            return cursor.moveToFirst() ? cursor.getInt(0) : 0;
+        } finally {
+            cursor.close();
         }
-        cursor.close();
-        return count;
+    }
+
+    public Cursor getOperationLogs() {
+        return getReadableDatabase().rawQuery(
+            "SELECT id, action, details, created_at " +
+            "FROM operation_logs ORDER BY id DESC LIMIT 500", null
+        );
+    }
+
+    public int clearTodayOrdersAfterExport() {
+        SQLiteDatabase db = getWritableDatabase();
+        String today = new SimpleDateFormat(
+            "yyyy-MM-dd", Locale.getDefault()
+        ).format(new Date());
+
+        db.beginTransaction();
+        try {
+            int result = db.delete(
+                "orders", "substr(created_at, 1, 10) = ?",
+                new String[]{today}
+            );
+            log(db, "تصفير طلبات اليوم", "عدد الطلبات المحذوفة: " + result);
+            db.setTransactionSuccessful();
+            return result;
+        } finally {
+            db.endTransaction();
+        }
     }
 }
