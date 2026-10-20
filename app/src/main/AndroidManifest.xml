@@ -1,8 +1,10 @@
+
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application
         android:allowBackup="false"
+        android:icon="@drawable/ic_haji_launcher"
         android:label="كاشير مطعم الحجي"
         android:supportsRtl="true"
         android:theme="@style/Theme.Sssssssy">
@@ -18,6 +20,7 @@
             </intent-filter>
 
         </activity>
+
     </application>
 
 </manifest>
