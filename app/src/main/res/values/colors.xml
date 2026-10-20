@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="haji_primary">#E85D04</color>
+    <color name="haji_dark">#B93800</color>
+    <color name="haji_red">#D62828</color>
+    <color name="haji_background">#FFF8F0</color>
+    <color name="haji_white">#FFFFFF</color>
+    <color name="haji_text">#292321</color>
+    <color name="haji_muted">#776B65</color>
+    <color name="haji_border">#F0DED0</color>
+    <color name="haji_green">#238636</color>
+</resources>
