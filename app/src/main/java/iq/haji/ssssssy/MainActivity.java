@@ -1,11 +1,14 @@
+
 package iq.haji.ssssssy;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
+import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.database.Cursor;
+import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
@@ -18,10 +21,13 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.Locale;
-import java.util.Map;
 
 public class MainActivity extends Activity {
 
@@ -33,16 +39,17 @@ public class MainActivity extends Activity {
     private final int WHITE = Color.WHITE;
     private final int GREEN = Color.rgb(35, 134, 54);
 
-    private DatabaseHelper database;
+    private static final int EXPORT_REQUEST = 7001;
 
+    private DatabaseHelper database;
     private LinearLayout root;
     private LinearLayout categoryList;
     private LinearLayout dishList;
     private LinearLayout cartList;
-
     private TextView totalText;
     private TextView countText;
     private TextView categoryTitle;
+    private EditText phoneInput;
 
     private long selectedCategoryId = -1;
     private String selectedCategoryName = "";
@@ -77,10 +84,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         database = new DatabaseHelper(this);
         buildScreen();
         loadCategories();
+        updateOrderCount();
     }
 
     private void buildScreen() {
@@ -94,110 +101,117 @@ public class MainActivity extends Activity {
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(14), dp(8), dp(14), dp(8));
+        header.setPadding(dp(12), dp(7), dp(12), dp(7));
         header.setBackground(round(ORANGE, 14));
 
-        TextView brand = text("🍕 مطعم الحجي", 23, WHITE, true);
+        TextView brand = text("🍕 مطعم الحجي", 22, WHITE, true);
         header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1));
 
         countText = text("الطلبات: 0", 14, WHITE, true);
         header.addView(countText);
 
-        root.addView(header, margins(-1, -2, 0, 0, 0, 8));
+        root.addView(header, margins(-1, -2, 0, 0, 0, 7));
 
-        LinearLayout management = new LinearLayout(this);
-        management.setOrientation(LinearLayout.HORIZONTAL);
-        management.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout toolbar = new LinearLayout(this);
+        toolbar.setOrientation(LinearLayout.HORIZONTAL);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
 
-        Button addCategoryButton = button("+ قسم", DARK);
-        addCategoryButton.setOnClickListener(v -> showAddCategoryDialog());
+        Button addCategory = button("+ قسم", DARK);
+        addCategory.setOnClickListener(v -> showAddCategoryDialog());
 
-        Button addDishButton = button("+ طبق", ORANGE);
-        addDishButton.setOnClickListener(v -> showAddDishDialog());
+        Button addDish = button("+ طبق", ORANGE);
+        addDish.setOnClickListener(v -> showAddDishDialog());
 
-        Button manageDishButton = button("تعديل المنيو", RED);
-        manageDishButton.setOnClickListener(v -> showManageDishesDialog());
+        Button manageDish = button("تعديل المنيو", RED);
+        manageDish.setOnClickListener(v -> showManageDishesDialog());
 
-        management.addView(addCategoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
-        management.addView(addDishButton, margins(0, dp(42), 5, 0, 5, 0));
-        management.addView(manageDishButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        Button report = button("تقرير اليوم", GREEN);
+        report.setOnClickListener(v -> showDailyReport());
 
-        root.addView(management, margins(-1, -2, 0, 0, 0, 8));
+        toolbar.addView(addCategory, new LinearLayout.LayoutParams(0, dp(40), 1));
+        toolbar.addView(addDish, margins(0, dp(40), 4, 0, 4, 0));
+        toolbar.addView(manageDish, new LinearLayout.LayoutParams(0, dp(40), 1));
+        toolbar.addView(report, margins(0, dp(40), 4, 0, 0, 0));
+
+        root.addView(toolbar, margins(-1, -2, 0, 0, 0, 7));
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.HORIZONTAL);
         content.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        // لوحة الأطباق
         LinearLayout menuPanel = panel();
         menuPanel.setOrientation(LinearLayout.VERTICAL);
-        menuPanel.setPadding(dp(9), dp(9), dp(9), dp(9));
+        menuPanel.setPadding(dp(8), dp(8), dp(8), dp(8));
 
-        categoryTitle = text("الأطباق", 19, DARK, true);
-        menuPanel.addView(categoryTitle, margins(-1, -2, 0, 0, 0, 6));
+        categoryTitle = text("الأطباق", 18, DARK, true);
+        menuPanel.addView(categoryTitle, margins(-1, -2, 0, 0, 0, 5));
 
         HorizontalScrollView categoryScroll = new HorizontalScrollView(this);
         categoryScroll.setHorizontalScrollBarEnabled(false);
-
         categoryList = new LinearLayout(this);
         categoryList.setOrientation(LinearLayout.HORIZONTAL);
-        categoryList.setPadding(0, 0, 0, dp(4));
-
         categoryScroll.addView(categoryList);
-        menuPanel.addView(categoryScroll, margins(-1, -2, 0, 0, 0, 6));
+        menuPanel.addView(categoryScroll, margins(-1, -2, 0, 0, 0, 5));
 
         ScrollView dishScroll = new ScrollView(this);
         dishList = new LinearLayout(this);
         dishList.setOrientation(LinearLayout.VERTICAL);
         dishScroll.addView(dishList);
-
         menuPanel.addView(dishScroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         content.addView(menuPanel, new LinearLayout.LayoutParams(0, -1, 1.2f));
 
-        // لوحة الطلب الحالي
         LinearLayout cartPanel = panel();
         cartPanel.setOrientation(LinearLayout.VERTICAL);
-        cartPanel.setPadding(dp(9), dp(9), dp(9), dp(9));
+        cartPanel.setPadding(dp(8), dp(8), dp(8), dp(8));
 
-        TextView cartTitle = text("الطلب الحالي", 19, DARK, true);
-        cartPanel.addView(cartTitle, margins(-1, -2, 0, 0, 0, 6));
+        cartPanel.addView(
+            text("الطلب الحالي", 18, DARK, true),
+            margins(-1, -2, 0, 0, 0, 4)
+        );
+
+        phoneInput = new EditText(this);
+        phoneInput.setSingleLine(true);
+        phoneInput.setTextSize(15);
+        phoneInput.setInputType(InputType.TYPE_CLASS_PHONE);
+        phoneInput.setHint("رقم الزبون");
+        phoneInput.setTextDirection(View.TEXT_DIRECTION_LTR);
+        phoneInput.setPadding(dp(10), dp(4), dp(10), dp(4));
+        cartPanel.addView(phoneInput, margins(-1, dp(46), 0, 0, 0, 5));
 
         ScrollView cartScroll = new ScrollView(this);
         cartList = new LinearLayout(this);
         cartList.setOrientation(LinearLayout.VERTICAL);
         cartScroll.addView(cartList);
-
         cartPanel.addView(cartScroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        totalText = text("الإجمالي: 0 د.ع", 19, ORANGE, true);
+        totalText = text("الإجمالي: 0 د.ع", 18, ORANGE, true);
         totalText.setGravity(Gravity.CENTER);
-        cartPanel.addView(totalText, margins(-1, -2, 0, 8, 0, 8));
+        cartPanel.addView(totalText, margins(-1, -2, 0, 5, 0, 5));
 
-        Button saveButton = button("حفظ الطلب", GREEN);
-        saveButton.setOnClickListener(v -> saveCurrentOrder());
-        cartPanel.addView(saveButton, margins(-1, dp(46), 0, 0, 0, 5));
+        Button save = button("حفظ الطلب", GREEN);
+        save.setOnClickListener(v -> saveCurrentOrder());
+        cartPanel.addView(save, margins(-1, dp(44), 0, 0, 0, 5));
 
-        Button recentButton = button("آخر الطلبات", DARK);
-        recentButton.setOnClickListener(v -> showRecentOrders());
-        cartPanel.addView(recentButton, margins(-1, dp(42), 0, 0, 0, 0));
+        Button recent = button("الطلبات وسجل الإلغاء", DARK);
+        recent.setOnClickListener(v -> showRecentOrders());
+        cartPanel.addView(recent, margins(-1, dp(40), 0, 0, 0, 5));
+
+        Button export = button("تصدير طلبات اليوم CSV", ORANGE);
+        export.setOnClickListener(v -> startExport());
+        cartPanel.addView(export, margins(-1, dp(40), 0, 0, 0, 0));
 
         content.addView(cartPanel, new LinearLayout.LayoutParams(0, -1, 0.9f));
-
-        updateOrderCount();
     }
 
     private void loadCategories() {
         categories.clear();
-
         Cursor cursor = database.getCategories();
+
         try {
             while (cursor.moveToNext()) {
-                categories.add(new Category(
-                    cursor.getLong(0),
-                    cursor.getString(1)
-                ));
+                categories.add(new Category(cursor.getLong(0), cursor.getString(1)));
             }
         } finally {
             cursor.close();
@@ -212,35 +226,44 @@ public class MainActivity extends Activity {
             return;
         }
 
-        Category offers = categories.get(0);
+        Category selected = null;
         for (Category category : categories) {
-            if ("العروضات".equals(category.name)) {
-                offers = category;
+            if (category.id == selectedCategoryId) {
+                selected = category;
                 break;
             }
         }
 
-        selectCategory(offers);
+        if (selected == null) {
+            selected = categories.get(0);
+            for (Category category : categories) {
+                if ("العروضات".equals(category.name)) {
+                    selected = category;
+                    break;
+                }
+            }
+        }
+
+        selectCategory(selected);
     }
 
     private void renderCategories() {
         categoryList.removeAllViews();
 
         for (Category category : categories) {
-            Button categoryButton = button(category.name, 
-                category.id == selectedCategoryId ? ORANGE : DARK);
-
-            categoryButton.setTextSize(14);
-            categoryButton.setOnClickListener(v -> selectCategory(category));
-
-            categoryList.addView(categoryButton, margins(-2, dp(40), 0, 0, 5, 0));
+            Button b = button(
+                category.name,
+                category.id == selectedCategoryId ? ORANGE : DARK
+            );
+            b.setTextSize(13);
+            b.setOnClickListener(v -> selectCategory(category));
+            categoryList.addView(b, margins(-2, dp(38), 0, 0, 4, 0));
         }
     }
 
     private void selectCategory(Category category) {
         selectedCategoryId = category.id;
         selectedCategoryName = category.name;
-
         categoryTitle.setText("أطباق " + category.name);
         renderCategories();
         renderDishes();
@@ -250,17 +273,16 @@ public class MainActivity extends Activity {
         dishList.removeAllViews();
 
         if (selectedCategoryId < 0) {
-            dishList.addView(text("أضف قسماً حتى تبدأ بإضافة الأطباق.", 16, MUTED, false));
+            dishList.addView(text("أضف قسماً أولاً.", 15, MUTED, false));
             return;
         }
 
         Cursor cursor = database.getDishesByCategory(selectedCategoryId);
-        boolean hasDishes = false;
+        boolean found = false;
 
         try {
             while (cursor.moveToNext()) {
-                hasDishes = true;
-
+                found = true;
                 long id = cursor.getLong(0);
                 String name = cursor.getString(1);
                 int price = cursor.getInt(2);
@@ -268,87 +290,68 @@ public class MainActivity extends Activity {
                 LinearLayout row = new LinearLayout(this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(dp(9), dp(7), dp(9), dp(7));
-                row.setBackground(round(WHITE, 12));
-
-                dishList.addView(row, margins(-1, -2, 0, 0, 0, 6));
+                row.setPadding(dp(8), dp(5), dp(8), dp(5));
+                row.setBackground(round(WHITE, 10));
+                dishList.addView(row, margins(-1, -2, 0, 0, 0, 5));
 
                 LinearLayout labels = new LinearLayout(this);
                 labels.setOrientation(LinearLayout.VERTICAL);
-
-                labels.addView(text(name, 17, DARK, true));
+                labels.addView(text(name, 16, DARK, true));
                 labels.addView(text(
                     String.format(Locale.getDefault(), "%,d د.ع", price),
-                    14, MUTED, false
+                    13, MUTED, false
                 ));
-
                 row.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
 
-                Button addButton = button("+", ORANGE);
-                addButton.setTextSize(21);
-                addButton.setOnClickListener(v -> addToCart(id, name, price));
-
-                row.addView(addButton, new LinearLayout.LayoutParams(dp(48), dp(42)));
+                Button add = button("+", ORANGE);
+                add.setTextSize(20);
+                add.setOnClickListener(v -> addToCart(id, name, price));
+                row.addView(add, new LinearLayout.LayoutParams(dp(44), dp(40)));
             }
         } finally {
             cursor.close();
         }
 
-        if (!hasDishes) {
-            TextView empty = text(
-                "هذا القسم فارغ حالياً.\nاستخدم زر + طبق لإضافة أول طبق.",
-                16, MUTED, false
-            );
+        if (!found) {
+            TextView empty = text("القسم فارغ. استخدم زر + طبق.", 15, MUTED, false);
             empty.setGravity(Gravity.CENTER);
-            dishList.addView(empty, margins(-1, -2, 0, 20, 0, 0));
+            dishList.addView(empty, margins(-1, -2, 0, 18, 0, 0));
         }
     }
 
     private void addToCart(long id, String name, int price) {
         CartItem item = cart.get(id);
-
-        if (item == null) {
-            cart.put(id, new CartItem(id, name, price));
-        } else {
-            item.quantity++;
-        }
-
+        if (item == null) cart.put(id, new CartItem(id, name, price));
+        else item.quantity++;
         renderCart();
     }
 
     private void renderCart() {
         cartList.removeAllViews();
-        int total = 0;
+        long total = 0;
 
         for (CartItem item : cart.values()) {
-            total += item.price * item.quantity;
+            total += (long) item.price * item.quantity;
 
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            cartList.addView(row, margins(-1, -2, 0, 0, 0, 5));
+            cartList.addView(row, margins(-1, -2, 0, 0, 0, 4));
 
             TextView details = text(
-                item.name + "\n" + item.quantity + " × " +
-                String.format(Locale.getDefault(), "%,d", item.price) +
-                " = " + String.format(Locale.getDefault(), "%,d",
-                item.quantity * item.price) + " د.ع",
-                14, DARK, true
+                item.name + "\n" + item.quantity + " × " + item.price +
+                " = " + ((long) item.quantity * item.price) + " د.ع",
+                13, DARK, true
             );
-
             row.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
 
             Button minus = button("−", RED);
             minus.setOnClickListener(v -> {
-                if (item.quantity <= 1) {
-                    cart.remove(item.dishId);
-                } else {
-                    item.quantity--;
-                }
+                if (item.quantity <= 1) cart.remove(item.dishId);
+                else item.quantity--;
                 renderCart();
             });
-
-            row.addView(minus, new LinearLayout.LayoutParams(dp(40), dp(40)));
+            row.addView(minus, new LinearLayout.LayoutParams(dp(38), dp(38)));
         }
 
         totalText.setText("الإجمالي: " +
@@ -358,36 +361,33 @@ public class MainActivity extends Activity {
     private void showAddCategoryDialog() {
         EditText input = new EditText(this);
         input.setSingleLine(true);
-        input.setHint("اسم القسم الجديد");
+        input.setHint("اسم القسم");
 
         new AlertDialog.Builder(this)
             .setTitle("إضافة قسم")
             .setView(input)
             .setNegativeButton("إلغاء", null)
-            .setPositiveButton("حفظ", (dialog, which) -> {
+            .setPositiveButton("حفظ", (d, w) -> {
                 String name = input.getText().toString().trim();
-
                 if (name.isEmpty()) {
                     toast("اكتب اسم القسم");
                     return;
                 }
 
-                long result = database.addCategory(name);
-
-                if (result == -1) {
-                    toast("تعذر إضافة القسم. قد يكون الاسم موجوداً.");
+                long id = database.addCategory(name);
+                if (id == -1) {
+                    toast("تعذرت الإضافة. ربما الاسم موجود.");
                 } else {
                     loadCategories();
-                    for (Category category : categories) {
-                        if (category.id == result) {
-                            selectCategory(category);
+                    for (Category c : categories) {
+                        if (c.id == id) {
+                            selectCategory(c);
                             break;
                         }
                     }
                     toast("تم حفظ القسم");
                 }
-            })
-            .show();
+            }).show();
     }
 
     private void showAddDishDialog() {
@@ -398,50 +398,49 @@ public class MainActivity extends Activity {
 
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(20), dp(8), dp(20), dp(4));
+        form.setPadding(dp(18), dp(6), dp(18), dp(4));
 
-        TextView category = text("القسم: " + selectedCategoryName, 15, MUTED, true);
-        form.addView(category, margins(-1, -2, 0, 0, 0, 8));
+        EditText name = new EditText(this);
+        name.setSingleLine(true);
+        name.setHint("اسم الطبق");
+        form.addView(name);
 
-        EditText nameInput = new EditText(this);
-        nameInput.setSingleLine(true);
-        nameInput.setHint("اسم الطبق");
-        form.addView(nameInput);
-
-        EditText priceInput = new EditText(this);
-        priceInput.setSingleLine(true);
-        priceInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        priceInput.setHint("السعر بالدينار العراقي");
-        form.addView(priceInput);
+        EditText price = new EditText(this);
+        price.setSingleLine(true);
+        price.setInputType(InputType.TYPE_CLASS_NUMBER);
+        price.setHint("السعر بالدينار");
+        form.addView(price);
 
         new AlertDialog.Builder(this)
-            .setTitle("إضافة طبق")
+            .setTitle("إضافة طبق — " + selectedCategoryName)
             .setView(form)
             .setNegativeButton("إلغاء", null)
-            .setPositiveButton("حفظ", (dialog, which) -> {
-                String name = nameInput.getText().toString().trim();
-                String priceString = priceInput.getText().toString().trim();
+            .setPositiveButton("حفظ", (d, w) -> {
+                String n = name.getText().toString().trim();
+                String p = price.getText().toString().trim();
 
-                if (name.isEmpty() || priceString.isEmpty()) {
-                    toast("اكتب اسم الطبق والسعر");
+                if (n.isEmpty() || p.isEmpty()) {
+                    toast("اكتب الاسم والسعر");
                     return;
                 }
 
                 try {
-                    int price = Integer.parseInt(priceString);
-                    long result = database.addDish(name, price, selectedCategoryId);
+                    int value = Integer.parseInt(p);
+                    if (value < 0) {
+                        toast("السعر غير صحيح");
+                        return;
+                    }
 
-                    if (result == -1) {
+                    if (database.addDish(n, value, selectedCategoryId) == -1) {
                         toast("تعذر حفظ الطبق");
                     } else {
                         renderDishes();
                         toast("تم حفظ الطبق");
                     }
-                } catch (NumberFormatException exception) {
+                } catch (NumberFormatException e) {
                     toast("السعر غير صحيح");
                 }
-            })
-            .show();
+            }).show();
     }
 
     private void showManageDishesDialog() {
@@ -451,44 +450,40 @@ public class MainActivity extends Activity {
         }
 
         ArrayList<Long> ids = new ArrayList<>();
-        ArrayList<String> labels = new ArrayList<>();
-
+        ArrayList<String> names = new ArrayList<>();
         Cursor cursor = database.getDishesByCategory(selectedCategoryId);
+
         try {
             while (cursor.moveToNext()) {
                 ids.add(cursor.getLong(0));
-                labels.add(cursor.getString(1) + " — " +
-                    String.format(Locale.getDefault(), "%,d", cursor.getInt(2)) +
-                    " د.ع");
+                names.add(cursor.getString(1) + " — " + cursor.getInt(2) + " د.ع");
             }
         } finally {
             cursor.close();
         }
 
         if (ids.isEmpty()) {
-            toast("هذا القسم لا يحتوي أطباقاً");
+            toast("ماكو أطباق بهذا القسم");
             return;
         }
 
         new AlertDialog.Builder(this)
-            .setTitle("اختر الطبق للتعديل أو الحذف")
-            .setItems(labels.toArray(new String[0]), (dialog, which) -> {
-                showDishActions(ids.get(which));
-            })
+            .setTitle("اختار الطبق")
+            .setItems(names.toArray(new String[0]),
+                (d, which) -> showDishActions(ids.get(which)))
             .setNegativeButton("إغلاق", null)
             .show();
     }
 
-    private void showDishActions(long dishId) {
+    private void showDishActions(long id) {
         Cursor cursor = database.getReadableDatabase().rawQuery(
             "SELECT name, price FROM dishes WHERE id = ?",
-            new String[]{String.valueOf(dishId)}
+            new String[]{String.valueOf(id)}
         );
 
         if (!cursor.moveToFirst()) {
             cursor.close();
             toast("الطبق غير موجود");
-            renderDishes();
             return;
         }
 
@@ -498,83 +493,83 @@ public class MainActivity extends Activity {
 
         new AlertDialog.Builder(this)
             .setTitle(name)
-            .setItems(new String[]{"تعديل الاسم والسعر", "حذف الطبق"}, (dialog, which) -> {
-                if (which == 0) {
-                    showEditDishDialog(dishId, name, price);
-                } else {
-                    confirmDeleteDish(dishId, name);
-                }
-            })
-            .setNegativeButton("إلغاء", null)
+            .setItems(new String[]{"تعديل الاسم والسعر", "حذف من المنيو"},
+                (d, which) -> {
+                    if (which == 0) showEditDishDialog(id, name, price);
+                    else confirmDeleteDish(id, name);
+                })
+            .setNegativeButton("رجوع", null)
             .show();
     }
 
     private void showEditDishDialog(long id, String oldName, int oldPrice) {
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(dp(20), dp(8), dp(20), dp(4));
+        form.setPadding(dp(18), dp(6), dp(18), dp(4));
 
-        EditText nameInput = new EditText(this);
-        nameInput.setSingleLine(true);
-        nameInput.setHint("اسم الطبق");
-        nameInput.setText(oldName);
-        form.addView(nameInput);
+        EditText name = new EditText(this);
+        name.setSingleLine(true);
+        name.setText(oldName);
+        name.setHint("اسم الطبق");
+        form.addView(name);
 
-        EditText priceInput = new EditText(this);
-        priceInput.setSingleLine(true);
-        priceInput.setInputType(InputType.TYPE_CLASS_NUMBER);
-        priceInput.setHint("السعر بالدينار");
-        priceInput.setText(String.valueOf(oldPrice));
-        form.addView(priceInput);
+        EditText price = new EditText(this);
+        price.setSingleLine(true);
+        price.setInputType(InputType.TYPE_CLASS_NUMBER);
+        price.setText(String.valueOf(oldPrice));
+        price.setHint("السعر");
+        form.addView(price);
 
         new AlertDialog.Builder(this)
             .setTitle("تعديل الطبق")
             .setView(form)
             .setNegativeButton("إلغاء", null)
-            .setPositiveButton("حفظ التعديل", (dialog, which) -> {
-                String name = nameInput.getText().toString().trim();
-                String priceText = priceInput.getText().toString().trim();
+            .setPositiveButton("حفظ", (d, w) -> {
+                String n = name.getText().toString().trim();
+                String p = price.getText().toString().trim();
 
-                if (name.isEmpty() || priceText.isEmpty()) {
+                if (n.isEmpty() || p.isEmpty()) {
                     toast("أكمل الاسم والسعر");
                     return;
                 }
 
                 try {
-                    int price = Integer.parseInt(priceText);
-                    int result = database.updateDish(id, name, price);
+                    int value = Integer.parseInt(p);
+                    if (value < 0) {
+                        toast("السعر غير صحيح");
+                        return;
+                    }
 
-                    if (result > 0) {
+                    if (database.updateDish(id, n, value) > 0) {
+                        CartItem item = cart.get(id);
+                        if (item != null) {
+                            item.name = n;
+                            item.price = value;
+                            renderCart();
+                        }
                         renderDishes();
                         toast("تم تعديل الطبق");
                     } else {
                         toast("لم يتم تعديل الطبق");
                     }
-                } catch (NumberFormatException exception) {
+                } catch (NumberFormatException e) {
                     toast("السعر غير صحيح");
                 }
-            })
-            .show();
+            }).show();
     }
 
     private void confirmDeleteDish(long id, String name) {
         new AlertDialog.Builder(this)
-            .setTitle("حذف الطبق")
-            .setMessage("تريد تحذف \"" + name + "\" من المنيو؟")
+            .setTitle("حذف الطبق من المنيو")
+            .setMessage("سيختفي الطبق من المنيو. تفاصيل الطلبات المحفوظة تبقى كما هي.\n\n" + name)
             .setNegativeButton("رجوع", null)
-            .setPositiveButton("حذف", (dialog, which) -> {
+            .setPositiveButton("حذف", (d, w) -> {
                 int result = database.deleteDish(id);
                 cart.remove(id);
                 renderCart();
                 renderDishes();
-
-                if (result > 0) {
-                    toast("تم حذف الطبق من المنيو");
-                } else {
-                    toast("تعذر حذف الطبق");
-                }
-            })
-            .show();
+                toast(result > 0 ? "تم حذف الطبق من المنيو" : "تعذر الحذف");
+            }).show();
     }
 
     private void saveCurrentOrder() {
@@ -583,75 +578,284 @@ public class MainActivity extends Activity {
             return;
         }
 
-        StringBuilder details = new StringBuilder();
-        int total = 0;
+        StringBuilder items = new StringBuilder();
+        long total = 0;
 
         for (CartItem item : cart.values()) {
-            int lineTotal = item.price * item.quantity;
+            long lineTotal = (long) item.price * item.quantity;
             total += lineTotal;
 
-            details.append(item.name)
+            items.append(item.name)
                 .append(" × ").append(item.quantity)
-                .append(" = ").append(lineTotal)
-                .append(" د.ع\n");
+                .append(" = ").append(lineTotal).append(" د.ع\n");
         }
 
-        long result = database.saveOrder(details.toString(), total);
+        if (total > Integer.MAX_VALUE) {
+            toast("الإجمالي أكبر من الحد المسموح");
+            return;
+        }
 
-        if (result != -1) {
-            cart.clear();
-            renderCart();
-            updateOrderCount();
+        String phone = phoneInput.getText().toString().trim();
+        long orderId = database.saveOrder(items.toString(), (int) total, phone);
 
-            new AlertDialog.Builder(this)
-                .setTitle("تم حفظ الطلب")
-                .setMessage("الإجمالي: " +
-                    String.format(Locale.getDefault(), "%,d", total) +
-                    " د.ع\nتم حفظ الطلب داخل الجهاز.")
-                .setPositiveButton("حسناً", null)
-                .show();
-        } else {
+        if (orderId == -1) {
             toast("تعذر حفظ الطلب");
+            return;
         }
+
+        cart.clear();
+        phoneInput.setText("");
+        renderCart();
+        updateOrderCount();
+
+        new AlertDialog.Builder(this)
+            .setTitle("تم حفظ الطلب")
+            .setMessage("رقم الزبون: " + (phone.isEmpty() ? "غير مسجل" : phone) +
+                "\nالإجمالي: " + String.format(Locale.getDefault(), "%,d", total) +
+                " د.ع\nتم حفظ الطلب داخل الجهاز.")
+            .setPositiveButton("حسناً", null)
+            .show();
     }
 
     private void showRecentOrders() {
-        Cursor cursor = database.getRecentOrders();
-        StringBuilder result = new StringBuilder();
+        Cursor cursor = database.getRecentOrdersDetailed();
+        ArrayList<Long> ids = new ArrayList<>();
+        ArrayList<String> labels = new ArrayList<>();
+        StringBuilder all = new StringBuilder();
 
         try {
             while (cursor.moveToNext()) {
-                result.append("طلب رقم ")
-                    .append(cursor.getInt(1)).append("\n")
-                    .append(cursor.getString(4)).append("\n")
-                    .append(cursor.getString(2))
-                    .append("الإجمالي: ")
-                    .append(String.format(Locale.getDefault(), "%,d", cursor.getInt(3)))
-                    .append(" د.ع\n")
-                    .append("-------------------------\n");
+                long id = cursor.getLong(0);
+                int number = cursor.getInt(1);
+                String items = cursor.getString(2);
+                int total = cursor.getInt(3);
+                String date = cursor.getString(4);
+                String phone = cursor.getString(5);
+                String status = cursor.getString(6);
+                String reason = cursor.getString(7);
+
+                String label = "طلب #" + number + " | " +
+                    String.format(Locale.getDefault(), "%,d", total) +
+                    " د.ع | " + status;
+
+                ids.add(id);
+                labels.add(label);
+
+                all.append(label).append("\n")
+                    .append(date).append("\n")
+                    .append("رقم الزبون: ")
+                    .append(phone.isEmpty() ? "غير مسجل" : phone)
+                    .append("\n").append(items);
+
+                if ("ملغي".equals(status)) {
+                    all.append("سبب الإلغاء: ").append(reason).append("\n");
+                }
+                all.append("-------------------------\n");
             }
         } finally {
             cursor.close();
         }
 
-        if (result.length() == 0) {
-            result.append("ماكو طلبات محفوظة لحد الآن.");
+        if (ids.isEmpty()) {
+            toast("ماكو طلبات محفوظة");
+            return;
         }
 
+        new AlertDialog.Builder(this)
+            .setTitle("الطلبات — اضغط على طلب لإجراء عملية")
+            .setItems(labels.toArray(new String[0]), (d, which) -> {
+                showOrderActions(ids.get(which));
+            })
+            .setNeutralButton("عرض التفاصيل", (d, w) -> showOrdersText(all.toString()))
+            .setNegativeButton("إغلاق", null)
+            .show();
+    }
+
+    private void showOrdersText(String text) {
         ScrollView scroll = new ScrollView(this);
-        TextView body = text(result.toString(), 15, DARK, false);
+        TextView body = text(text, 14, DARK, false);
         body.setPadding(dp(12), dp(8), dp(12), dp(8));
         scroll.addView(body);
 
         new AlertDialog.Builder(this)
-            .setTitle("آخر الطلبات")
+            .setTitle("تفاصيل الطلبات")
             .setView(scroll)
             .setPositiveButton("إغلاق", null)
             .show();
     }
 
+    private void showOrderActions(long id) {
+        Cursor cursor = database.getReadableDatabase().rawQuery(
+            "SELECT order_number, total, status FROM orders WHERE id = ?",
+            new String[]{String.valueOf(id)}
+        );
+
+        if (!cursor.moveToFirst()) {
+            cursor.close();
+            toast("الطلب غير موجود");
+            return;
+        }
+
+        int number = cursor.getInt(0);
+        int total = cursor.getInt(1);
+        String status = cursor.getString(2);
+        cursor.close();
+
+        if ("ملغي".equals(status)) {
+            toast("هذا الطلب ملغي مسبقاً");
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("طلب رقم " + number)
+            .setMessage("الإجمالي: " +
+                String.format(Locale.getDefault(), "%,d", total) + " د.ع")
+            .setPositiveButton("إلغاء الطلب", (d, w) -> showCancelReason(id, number))
+            .setNegativeButton("رجوع", null)
+            .show();
+    }
+
+    private void showCancelReason(long id, int number) {
+        EditText reason = new EditText(this);
+        reason.setHint("اكتب سبب إلغاء الطلب");
+        reason.setMinLines(2);
+
+        new AlertDialog.Builder(this)
+            .setTitle("إلغاء الطلب رقم " + number)
+            .setMessage("سيبقى الطلب محفوظاً في السجل.")
+            .setView(reason)
+            .setNegativeButton("رجوع", null)
+            .setPositiveButton("تأكيد الإلغاء", (d, w) -> {
+                String value = reason.getText().toString().trim();
+
+                if (value.isEmpty()) {
+                    toast("سبب الإلغاء مطلوب");
+                    return;
+                }
+
+                int result = database.cancelOrder(id, value);
+                if (result > 0) {
+                    database.logOperation(
+                        "تنبيه: إلغاء من الواجهة",
+                        "تم إلغاء الطلب رقم " + number
+                    );
+                    updateOrderCount();
+                    toast("تم تسجيل إلغاء الطلب");
+                } else {
+                    toast("تعذر إلغاء الطلب");
+                }
+            }).show();
+    }
+
+    private void showDailyReport() {
+        int sales = database.getTodaySales();
+        int count = database.getTodayOrdersCount();
+
+        Cursor cursor = database.getTodayOrders();
+        int cancelled = 0;
+
+        try {
+            while (cursor.moveToNext()) {
+                if ("ملغي".equals(cursor.getString(6))) cancelled++;
+            }
+        } finally {
+            cursor.close();
+        }
+
+        String date = new SimpleDateFormat(
+            "yyyy-MM-dd", Locale.getDefault()
+        ).format(new Date());
+
+        String message = "التاريخ: " + date +
+            "\nعدد الطلبات: " + count +
+            "\nالطلبات الملغاة: " + cancelled +
+            "\nصافي المبيعات للطلبات غير الملغاة: " +
+            String.format(Locale.getDefault(), "%,d", sales) + " د.ع" +
+            "\n\nصدّر بيانات اليوم قبل أي تصفير.";
+
+        new AlertDialog.Builder(this)
+            .setTitle("تقرير اليوم")
+            .setMessage(message)
+            .setPositiveButton("تصدير CSV", (d, w) -> startExport())
+            .setNegativeButton("إغلاق", null)
+            .show();
+    }
+
+    private void startExport() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/csv");
+        intent.putExtra(
+            Intent.EXTRA_TITLE,
+            "haji-orders-" +
+            new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                .format(new Date()) + ".csv"
+        );
+        startActivityForResult(intent, EXPORT_REQUEST);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode != EXPORT_REQUEST || resultCode != RESULT_OK ||
+            data == null || data.getData() == null) {
+            return;
+        }
+
+        exportTodayCsv(data.getData());
+    }
+
+    private void exportTodayCsv(Uri uri) {
+        Cursor cursor = database.getTodayOrders();
+
+        try (OutputStream output = getContentResolver().openOutputStream(uri)) {
+            if (output == null) {
+                toast("تعذر فتح الملف");
+                return;
+            }
+
+            String header = "رقم الطلب,التاريخ,رقم الزبون,الحالة,الإجمالي,التفاصيل,سبب الإلغاء\n";
+            output.write(header.getBytes(StandardCharsets.UTF_8));
+
+            while (cursor.moveToNext()) {
+                String[] fields = {
+                    String.valueOf(cursor.getInt(1)),
+                    cursor.getString(4),
+                    cursor.getString(5),
+                    cursor.getString(6),
+                    String.valueOf(cursor.getInt(3)),
+                    cursor.getString(2),
+                    cursor.getString(7)
+                };
+
+                StringBuilder line = new StringBuilder();
+                for (int i = 0; i < fields.length; i++) {
+                    if (i > 0) line.append(',');
+                    line.append(csvEscape(fields[i]));
+                }
+                line.append("\r\n");
+                output.write(line.toString().getBytes(StandardCharsets.UTF_8));
+            }
+
+            output.flush();
+            toast("تم تصدير بيانات اليوم");
+        } catch (Exception e) {
+            toast("فشل التصدير: " + e.getMessage());
+        } finally {
+            cursor.close();
+        }
+    }
+
+    private String csvEscape(String value) {
+        if (value == null) value = "";
+        return "\"" + value.replace("\"", "\"\"") + "\"";
+    }
+
     private void updateOrderCount() {
-        countText.setText("الطلبات: " + database.getOrdersCount());
+        if (countText != null) {
+            countText.setText("الطلبات: " + database.getOrdersCount());
+        }
     }
 
     private LinearLayout panel() {
@@ -668,20 +872,22 @@ public class MainActivity extends Activity {
         view.setTextColor(color);
         view.setTextDirection(View.TEXT_DIRECTION_RTL);
         view.setGravity(Gravity.CENTER_VERTICAL);
-        view.setTypeface(Typeface.DEFAULT, bold ? Typeface.BOLD : Typeface.NORMAL);
+        view.setTypeface(
+            Typeface.DEFAULT, bold ? Typeface.BOLD : Typeface.NORMAL
+        );
         return view;
     }
 
     private Button button(String value, int color) {
         Button view = new Button(this);
         view.setText(value);
-        view.setTextSize(14);
+        view.setTextSize(13);
         view.setTextColor(WHITE);
         view.setAllCaps(false);
         view.setMinHeight(0);
         view.setMinimumHeight(0);
-        view.setPadding(dp(8), dp(4), dp(8), dp(4));
-        view.setBackground(round(color, 10));
+        view.setPadding(dp(5), dp(3), dp(5), dp(3));
+        view.setBackground(round(color, 9));
         return view;
     }
 
@@ -698,7 +904,6 @@ public class MainActivity extends Activity {
     ) {
         LinearLayout.LayoutParams params =
             new LinearLayout.LayoutParams(width, height);
-
         params.setMargins(dp(left), dp(top), dp(right), dp(bottom));
         return params;
     }
@@ -709,14 +914,12 @@ public class MainActivity extends Activity {
     }
 
     private void toast(String message) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
     @Override
     protected void onDestroy() {
-        if (database != null) {
-            database.close();
-        }
+        if (database != null) database.close();
         super.onDestroy();
     }
 }
