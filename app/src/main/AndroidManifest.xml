@@ -1,9 +1,6 @@
+
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-    <!-- صلاحيات استقبال المكالمات وقراءة رقم المتصل -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <uses-permission android:name="android.permission.READ_CALL_LOG" />
 
     <application
         android:allowBackup="true"
@@ -11,21 +8,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Sssssssy">
 
-        <!-- استقبال حالة المكالمة الواردة -->
-        <receiver
-            android:name=".IncomingCallReceiver"
-            android:enabled="true"
-            android:exported="true">
-
-            <intent-filter>
-                <action android:name="android.intent.action.PHONE_STATE" />
-            </intent-filter>
-
-        </receiver>
-
-        <!-- الواجهة الرئيسية للكاشير -->
         <activity
-            android:name=".MainActivity"
+            android:name=".CallEnabledMainActivity"
             android:exported="true"
             android:screenOrientation="landscape">
 
@@ -35,6 +19,19 @@
             </intent-filter>
 
         </activity>
+
+        <service
+            android:name=".CallerScreeningService"
+            android:permission="android.permission.BIND_SCREENING_SERVICE"
+            android:exported="true"
+            android:enabled="true">
+
+            <intent-filter>
+                <action
+                    android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+
+        </service>
 
     </application>
 
