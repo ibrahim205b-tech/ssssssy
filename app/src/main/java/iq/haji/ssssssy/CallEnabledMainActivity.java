@@ -1,4 +1,6 @@
+
 package iq.haji.ssssssy;
+
 import android.app.role.RoleManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -75,7 +77,6 @@ public class CallEnabledMainActivity extends MainActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // طلب صلاحية استقبال رقم المتصل عند أول تشغيل فقط.
         handler.postDelayed(
                 this::requestScreeningRoleOnFirstLaunch,
                 1000
@@ -125,7 +126,6 @@ public class CallEnabledMainActivity extends MainActivity {
             return;
         }
 
-        // نسجل ظهور الطلب حتى لا يتكرر عند تشغيل التطبيق لاحقاً.
         setupPreferences.edit()
                 .putBoolean(KEY_FIRST_ROLE_PROMPT_DONE, true)
                 .apply();
@@ -281,7 +281,6 @@ public class CallEnabledMainActivity extends MainActivity {
         }
 
         lastSeenStoredNumber = number.trim();
-
         updatingIncomingNumber = true;
 
         customerPhone.setText(lastSeenStoredNumber);
@@ -389,9 +388,114 @@ public class CallEnabledMainActivity extends MainActivity {
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         dp(40)
-                    }
                 );
 
         rowParams.setMargins(0, 0, 0, dp(4));
 
-        parent.addView(row, phoneIndex + 
+        parent.addView(row, phoneIndex + 1, rowParams);
+
+        controlsAdded = true;
+    }
+
+    private Button createActionButton(
+            String title,
+            int backgroundColor
+    ) {
+        Button button = new Button(this);
+
+        button.setText(title);
+        button.setTextSize(11);
+        button.setAllCaps(false);
+        button.setTextColor(Color.WHITE);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setPadding(dp(4), 0, dp(4), 0);
+
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(backgroundColor);
+        background.setCornerRadius(dp(8));
+
+        button.setBackground(background);
+
+        return button;
+    }
+
+    private void transferNumber() {
+        if (customerPhone == null) {
+            findCustomerPhoneField();
+        }
+
+        updatingIncomingNumber = true;
+
+        if (customerPhone != null) {
+            customerPhone.setText("");
+        }
+
+        updatingIncomingNumber = false;
+
+        callPreferences().edit()
+                .remove(CallerScreeningService.KEY_PENDING_NUMBER)
+                .remove(CallerScreeningService.KEY_INCOMING_TIME)
+                .apply();
+
+        lastSeenStoredNumber = "";
+
+        Toast.makeText(
+                this,
+                "تم ترحيل الرقم دون إنشاء طلب",
+                Toast.LENGTH_SHORT
+        ).show();
+    }
+
+    private void applyCompactLayout(View view) {
+        if (view instanceof Button) {
+            Button button = (Button) view;
+
+            button.setTextSize(
+                    Math.min(
+                            button.getTextSize() /
+                                    getResources().getDisplayMetrics()
+                                            .scaledDensity,
+                            13
+                    )
+            );
+
+            button.setPadding(dp(4), dp(2), dp(4), dp(2));
+
+            ViewGroup.LayoutParams params = button.getLayoutParams();
+
+            if (params != null &&
+                    params.height > dp(38) &&
+                    params.height <= dp(48)) {
+                params.height = dp(36);
+                button.setLayoutParams(params);
+            }
+        } else if (view instanceof TextView &&
+                !(view instanceof EditText)) {
+
+            TextView textView = (TextView) view;
+
+            float size = textView.getTextSize() /
+                    getResources().getDisplayMetrics().scaledDensity;
+
+            if (size > 20) {
+                textView.setTextSize(20);
+            }
+        }
+
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+
+            for (int i = 0; i < group.getChildCount(); i++) {
+                applyCompactLayout(group.getChildAt(i));
+            }
+        }
+    }
+
+    private int dp(int value) {
+        return (int) (
+                value * getResources().getDisplayMetrics().density
+                        + 0.5f
+        );
+    }
+}
