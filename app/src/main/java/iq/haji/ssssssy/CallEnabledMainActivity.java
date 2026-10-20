@@ -389,6 +389,7 @@ public class CallEnabledMainActivity extends MainActivity {
                 new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         dp(40)
+                    }
                 );
 
         rowParams.setMargins(0, 0, 0, dp(4));
